@@ -1,0 +1,110 @@
+This analyzes the lenght of stay at aspire to test the hyptthesis that african american employees have shorter stays. In order to find the right model to predict length of stay at aspire, we set up a sample data set for employees who are no longer working for Aspire (this includes everyone who used to work either as a part time or full time employee). 
+
+The model is fitted on the training data set and then tested on the test data set (the employees not included in the sample).
+
+
+```{r}
+require(leaps)
+
+setwd("~/Work Docs/Godzilla/Equity Analysis")
+
+staydata=read.csv("lengthofstayataspire.csv",header=T)
+staydata=subset(staydata,YearHire>2007)
+
+staydata$IsAA=(staydata$EthnicCode==2) #define African American employees
+
+
+pairs(staydata$YearsAtAspire~staydata$Ethnicity)
+
+train = sample(seq(dim(staydata)[1]),1500,replace=FALSE)
+
+regfit.fwd=regsubsets(YearsAtAspire~EthnicCode+FullPartTimeCode+EmployeeTypeCode+JobGroup+Age+SchoolYearHire,data=staydata[train,],nvmax=35,method="forward")
+
+x.test=model.matrix(YearsAtAspire~EthnicCode+FullPartTimeCode+EmployeeTypeCode+JobGroup+Age+SchoolYearHire,data=staydata[-train,])#create the test set for college
+
+
+val.errors=rep(NA,35)
+
+for (i in 1:35) {
+    Coef=coef(regfit.fwd,id=i)
+    pred=x.test[,names(Coef)]%*%coef(regfit.fwd,id=i)
+    val.errors[i]=mean((staydata$YearsAtAspire[-train]-pred)^2)
+}
+
+
+select.coef=coef(regfit.fwd,id=which.min(val.errors))
+```
+
+The full model is selected - run the full model 
+Controlling for all these factors, African Americans (ethnic code=2) are 0.22 years less likely to be 
+
+
+```{r}
+require(ggplot2)
+
+stay.fit<-lm(YearsAtAspire~EthnicCode+FullPartTimeCode+EmployeeTypeCode+JobGroup+SchoolYearHire+Age,data=staydata)
+
+summary(stay.fit)
+
+
+
+x.label<-substr(unique(staydata$Ethnicity[order(staydata$EthnicCode)]),1,16)
+x.label<-x.label[2:length(x.label)]
+x.coef<-rep(NA,length(levels(staydata$EthnicCode))-1)
+for (i in 1:length(x.coef)) {
+  coefname<-paste("EthnicCode",levels(staydata$EthnicCode)[i+1],sep="")
+  x.coef[i]<-coef(stay.fit)[[coefname]]
+}
+
+x.se<-rep(NA,length(levels(staydata$EthnicCode))-1)
+for (i in 1:length(x.coef)) {
+  coefname<-paste("EthnicCode",levels(staydata$EthnicCode)[i+1],sep="")
+  x.se[i]<-summary(stay.fit)$coefficients[,2][[coefname]]
+}
+
+x.frame<-data.frame(x.label, x.coef,x.se)
+
+limits=aes(ymax=x.coef+x.se,ymin=x.coef-x.se)
+plot.title="Years At Aspire: Difference from White Employees for Controlling for Other Factors "
+plot.subtitle= "(factors include: job title, age, full/part time status, year started)"
+
+
+p=ggplot(x.frame,aes(x=x.frame$x.label,y=x.frame$x.coef),)
+p=p+ggtitle(plot.title) + theme(plot.title = element_text(size = 11, colour = "black", vjust = 1))
+p=p+geom_point(aes(colour=x.label,size=20))+geom_errorbar(limits,width=0.2)+theme(legend.position="none")+theme(axis.text.x=element_text(angle=-90))+xlab(" ") + ylab("residual difference in years") 
+p=p+geom_hline(aes(yintercept=0,linetype="dashed"),color="dark grey")+geom_text(aes(0,0,label="White Employee Average",vjust=-1,hjust=-.5),color="dark grey",size=4)
+
+
+
+
+```
+
+
+```{r}
+ library(scales)
+library(reshape2)
+
+heat.x<-sort(unique(staydata$TerminationSchoolYear))
+heat.y<-sort(unique(staydata$YearHire))
+heat.n<-length(heat.x)*length(heat.y)
+
+heat.years<-unique(staydata[,c("TerminationSchoolYear","YearHire")])
+heat.years$AAperc<-rep(NA,dim(heat.years)[2])
+
+for (i in 1:dim(heat.years)[1]) {
+  termi<-heat.years$TerminationSchoolYear[i]
+  starti<-heat.years$YearHire[i]
+  picki<-which(staydata$TerminationSchoolYear==termi&staydata$YearHire==starti)
+  heat.years$AAperc[i]<-mean(staydata[picki,"IsAA"])
+}
+
+heat.years$TerminationSchoolYear<-as.factor(heat.years$TerminationSchoolYear)
+
+p=ggplot(heat.years,aes(TerminationSchoolYear,YearHire,group=YearHire)) + 
+    ggtitle("% African American - with red being the highest")+
+    geom_tile(aes(fill = AAperc)) + 
+    ##geom_text(aes(fill = heat.years$AAperc, label = round(heat.years$AAperc, 2))) +
+    scale_fill_gradient(low = "white", high = "red")+ 
+    theme(axis.text.x=element_text(angle=-90))+
+    scale_y_continuous(breaks = round(seq(min(heat.years$YearHire), heat.years$YearHire, by = 1),1))
+

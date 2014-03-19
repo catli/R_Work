@@ -1,0 +1,407 @@
+
+Define multiplot function - this function prints multiple plots (created using ggplot function) on one page
+
+```{r}
+multiplot <- function(..., plotlist = NULL, file, cols = 1, layout = NULL) {
+  require(grid)
+
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+  if (numPlots == 1) {
+    print(plots[[1]])
+
+  } else {
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+````
+
+Mid-year Survey Analysis by Demographic Data 
+========================================================
+
+Set directory and read file format - csv - need to be filtered by question group so only questions relating to Aspire selected. Then create fields to define positive responses and those that should be counted towards toal responses
+
+```{r}
+setwd("~/Work Docs/Godzilla/Equity Analysis")
+
+mydata_all<-read.csv("midyearsurvey_1314.csv",sep=",",header=TRUE)
+
+
+mydata_aspire<-subset(mydata_all,QuestionGroup=='Affiliation'| 
+                                        QuestionGroup=='Gallup Q12 (Engagement)' |                                 
+                                        QuestionGroup=='Job Satisfaction' |
+                                        QuestionGroup=='Retention' |
+                                        QuestionGroup=='Site Culture' |
+                                        QuestionGroup=='Understanding Priorities & Policies')
+
+##creating age groups
+mydata_aspire$agegroup<-cut(mydata_aspire$Respondent_Age_FromHR,c(20,30,40,50,100) )
+
+questionfields<-c('Affiliation','Gallup Q12 (Engagement)','Job Satisfaction','Retention','Site Culture','Understanding Priorities & Policies')
+
+
+
+response.set<-which(mydata_aspire$Response_Numeric>0)
+
+#reverse the sequence for negative questions
+mydata_aspire$Response_Numeric[which(mydata_aspire$QuestionCommonID==152|mydata_aspire$QuestionCommonID==153)]=6-mydata_aspire$Response_Numeric[which(mydata_aspire$QuestionCommonID==152|mydata_aspire$QuestionCommonID==153)]
+
+#create concatenated school type and region
+mydata_aspire$schoolcomb<-paste(mydata_aspire$Respondent_Region_FromHR,mydata_aspire$SchoolType)
+schooltypefields<-unique(mydata_aspire$schoolcomb)
+
+
+
+```
+
+
+List out the different demographic variables we are basing our analysis off:
+```{r}
+demogvar<-c("Respondent_Gender_FromHR","EthnicGroup","JobGroup","agegroup")
+labelvar<-c("gender","race","job","age")
+
+
+```
+
+
+
+```{r}
+require(ggplot2)
+
+plot<-vector('list',length(questionfields)*4)
+#plot$race<-vector('list',length(questionfields))
+
+for (var in 1:4) {
+##paste("plot",labelvar[var])<-vector('list',length(questionfields))
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+
+  for (i in 1:length(questionfields)) {
+    qgroup<-questionfields[i]
+    qgroup.set<-response.set[which(mydata_aspire$QuestionGroup[response.set]==qgroup)]
+    qgroup.mean<-rep(NA,length(varlevels))
+    qgroup.se<-rep(NA,length(varlevels))
+    
+      for (j in 1:length(varlevels)) {   
+          levelj<-varlevels[j]
+          qgroup.var.set<-qgroup.set[which(mydata_aspire[[varselect]][qgroup.set]==levelj)]
+          qgroup.mean[j]<-mean(mydata_aspire$Response_Numeric[qgroup.var.set])
+          qgroup.se[j]<-1.96*sd(mydata_aspire$Response_Numeric[qgroup.var.set])/sqrt(length(mydata_aspire$Response_Numeric[qgroup.var.set]))    ## divide standard error by sqrt of n - to adjust for variation of averages
+      }
+      df<-data.frame(varlevels,qgroup.mean,qgroup.se)
+      limits<-aes(ymax=qgroup.mean+qgroup.se,ymin=qgroup.mean-qgroup.se)
+      p<-ggplot(df,aes(x=varlevels,y=qgroup.mean,ymin=3,ymax=5),)+ggtitle(paste(labelvar[var],":",qgroup))+theme(axis.text.x=element_text(angle=-90))+xlab(" ") + ylab("avg response")
+      plot[[(var-1)*6+i]]=p+geom_point(aes(colour=varlevels,size=20))+geom_errorbar(limits,width=0.2)+theme(legend.position="none")
+    }
+}
+
+multiplot(plotlist=c(plot),cols=4)
+
+```
+
+Create table that looks at percentage of positive responses
+
+
+```{r}
+
+plot<-vector('list',length(questionfields)*4)
+#plot$race<-vector('list',length(questionfields))
+
+for (var in 1:4) {
+##paste("plot",labelvar[var])<-vector('list',length(questionfields))
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+
+  for (i in 1:length(questionfields)) {
+    qgroup<-questionfields[i]
+    qgroup.set<-response.set[which(mydata_aspire$QuestionGroup[response.set]==qgroup)]
+    qgroup.mean<-rep(NA,length(varlevels))
+    qgroup.se<-rep(NA,length(varlevels))
+    
+      for (j in 1:length(varlevels)) {   
+          levelj<-varlevels[j]
+          qgroup.var.set<-qgroup.set[which(mydata_aspire[[varselect]][qgroup.set]==levelj)]
+          qgroup.mean[j]<-mean(I(mydata_aspire$Response_Numeric[qgroup.var.set]>3))
+          qgroup.se[j]<-1.96*(qgroup.mean[j])*(1-qgroup.mean[j])/sqrt(length(mydata_aspire$Response_Numeric[qgroup.var.set]))    ## divide standard error by sqrt of n - to adjust for variation of averages
+      }
+      df<-data.frame(varlevels,qgroup.mean,qgroup.se)
+      limits<-aes(ymax=qgroup.mean+qgroup.se,ymin=qgroup.mean-qgroup.se)
+      dodge<-position_dodge(width=0.4)
+      p<-ggplot(df,aes(x=varlevels,y=qgroup.mean,ymin=0.5,ymax=1),)+ggtitle(paste(labelvar[var],":",qgroup))+theme(axis.text.x=element_text(angle=-90))+xlab(" ") + ylab("% positive")
+      plot[[(var-1)*6+i]]=p+geom_point(aes(colour="grey50",size=40,shape=varlevels))+geom_errorbar(limits,width=0.2)+theme(legend.position="none")
+    }
+}
+
+multiplot(plotlist=c(plot),cols=4)
+
+
+##use this code to check  job satisfaction overall % correct data against data set
+i=3
+    qgroup<-questionfields[i]
+    qgroup.set<-response.set[which(mydata_aspire$QuestionGroup[response.set]==qgroup)]
+ table(mydata_aspire$Response_Numeric[qgroup.set])
+mean(I(mydata_aspire$Response_Numeric[qgroup.set]>3))
+
+```
+
+
+This script produces question-specific plots. choose the demogrpahic variable by setting var and choose the question group by selecting i
+
+
+
+```{r}
+require(ggplot2)
+
+grouptoID<-data.frame(table(mydata_aspire$QuestionCommonID,mydata_aspire$QuestionGroup)) #create` a question group to common ID reference
+
+#plot$race<-vector('list',length(questionfields))
+
+
+# manually set var 1=gender ; 2=ethnic group ; 3= job group ; 4=age group
+var=4
+
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+
+# manually set questionfield - 1=affiliation ; 2 = engagement ; 3 = job statisfaction ; 4 = retention ; 5=site culture ;; 6= priorities
+i=4
+
+  qgroup<-questionfields[i]
+  qcommonid<- subset(grouptoID,subset = Var2==qgroup & Freq>0)$Var1
+    
+
+  #define length based on list of questions
+  plot<-vector('list',length(qcommonid))
+
+
+for (k in 1:length(qcommonid)) {
+            qid<-qcommonid[k]  
+            qgroup.set<-response.set[which(mydata_aspire$QuestionCommonID[response.set]==qid)]
+            qtext<-substr(mydata_aspire$QuestionText_Cleaned[qgroup.set][1],1,60)
+            qgroup.mean<-rep(NA,length(varlevels))
+            qgroup.se<-rep(NA,length(varlevels))
+      
+              for (j in 1:length(varlevels)) {   
+                  levelj<-varlevels[j]
+                  qgroup.var.set<-qgroup.set[which(mydata_aspire[[varselect]][qgroup.set]==levelj)]
+                  qgroup.mean[j]<-mean(mydata_aspire$Response_Numeric[qgroup.var.set])
+                  qgroup.se[j]<-1.96*sd(mydata_aspire$Response_Numeric[qgroup.var.set])/sqrt(length(mydata_aspire$Response_Numeric[qgroup.var.set]))   
+                  ## divide standard error by sqrt of n - to adjust for variation of averages
+              }
+   
+            df<-data.frame(varlevels,qgroup.mean,qgroup.se)
+            limits<-aes(ymax=qgroup.mean+qgroup.se,ymin=qgroup.mean-qgroup.se)
+            p<-ggplot(df,aes(x=varlevels,y=qgroup.mean,ymin=3,ymax=5),)+ggtitle(paste(labelvar[var],":",qgroup,";",qid,qtext))
+            plot[[k]]=p+geom_point(aes(colour=varlevels,size=20))+geom_errorbar(limits,width=0.2)+theme(legend.position="none")     
+        }
+    
+multiplot(plotlist=c(plot),cols=2)
+
+
+
+```
+
+
+The next steps looks at the teacher level differences between different school type/regions 
+
+
+
+```{r}
+require(ggplot2)
+
+grouptoID<-data.frame(table(mydata_aspire$QuestionCommonID,mydata_aspire$QuestionGroup)) #create` a question group to common ID reference
+
+#plot$race<-vector('list',length(questionfields))
+
+
+# manually set var 1=gender ; 2=ethnic group ; 3= job group ; 4=age group
+var=3
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+groupselect<-varlevels[7] #select teacher group - #7 
+  
+
+# manually set questionfield - 1=affiliation ; 2 = engagement ; 3 = job statisfaction ; 4 = retention ; 5=site culture ;; 6= priorities
+i=3
+
+  qgroup<-questionfields[i]
+  qcommonid<- subset(grouptoID,subset = Var2==qgroup & Freq>0)$Var1
+   
+
+  #define length based on list of questions
+  plot<-vector('list',length(qcommonid))
+
+
+
+for (k in 1:length(qcommonid)) {
+            qid<-qcommonid[k]  
+            qgroup.set<-response.set[which(mydata_aspire$QuestionCommonID[response.set]==qid)]
+            qtext<-substr(mydata_aspire$QuestionText_Cleaned[qgroup.set][1],1,60)
+            qgroup.mean<-rep(NA,length(schooltypefields))
+            qgroup.se<-rep(NA,length(schooltypefields))
+      
+              for (j in 1:length(schooltypefields)) {   
+                  schoolj<-schooltypefields[j]
+                  qgroup.var.set<-qgroup.set[which(mydata_aspire[[varselect]][qgroup.set]==groupselect)]
+                  qgroup.var.set2<-qgroup.var.set[which(mydata_aspire[["schoolcomb"]][qgroup.var.set]==schoolj)]         
+                  qgroup.mean[j]<-mean(mydata_aspire$Response_Numeric[qgroup.var.set2])
+                  qgroup.se[j]<-1.96*sd(mydata_aspire$Response_Numeric[qgroup.var.set2])/sqrt(length(mydata_aspire$Response_Numeric[qgroup.var.set2]))   
+                  ## divide standard error by sqrt of n - to adjust for variation of averages
+              }
+   
+            df<-data.frame(schooltypefields,qgroup.mean,qgroup.se)
+            limits<-aes(ymax=qgroup.mean+qgroup.se,ymin=qgroup.mean-qgroup.se)
+            p<-ggplot(df,aes(x=schooltypefields,y=qgroup.mean,ymin=1,ymax=5),)+ggtitle(paste(groupselect,":",qgroup,";",qid,qtext))+theme(axis.text.x=element_text(angle=-90))+xlab(" ")+ylab("avg response")+xlab("")
+             plot[[k]]=p+geom_point(aes(colour=schooltypefields,size=20))+geom_text(aes(label=schooltypefields,colour=schooltypefields),size=3,angle=45,vjust=-3)+geom_errorbar(limits,width=0.2)+theme(legend.position="none")     
+        }
+    
+multiplot(plotlist=c(plot),cols=2)
+
+   
+
+
+```
+
+
+
+
+
+```{r}
+require("gee")
+  # gee allow generalized estimation equation wtih 
+
+# manually set var 1=gender ; 2=ethnic group ; 3= job group ; 4=age group
+var=3
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+groupselect<-varlevels[7] #select teacher group - #7 
+  
+
+# manually set questionfield - 1=affiliation ; 2 = engagement ; 3 = job statisfaction ; 4 = retention ; 5=site culture ;; 6= priorities
+i=3
+
+  qgroup<-questionfields[i]
+  qcommonid<- subset(grouptoID,subset = Var2==qgroup & Freq>0)$Var1
+
+
+
+```
+
+read in 
+
+```{r}
+
+data_allyears<-read.csv("allsurvey_1213_1314.csv",sep=",",header=TRUE)
+
+
+data_allyears<-subset(data_allyears,QuestionGroup=='Affiliation'| 
+                                        QuestionGroup=='Gallup Q12 (Engagement)' |                                 
+                                        QuestionGroup=='Job Satisfaction' |
+                                        QuestionGroup=='Retention' |
+                                        QuestionGroup=='Site Culture' |
+                                        QuestionGroup=='Understanding Priorities & Policies')
+
+
+###pick out the survey interested
+###12-13 mid year = 20 ; 12-13 end of year =21
+data_allyears<-subset(data_allyears,SurveyID==21)
+
+
+##creating age groups
+data_allyears$agegroup<-cut(data_allyears$Respondent_Age_FromHR,c(20,30,40,50,100))
+
+questionfields<-c('Affiliation','Gallup Q12 (Engagement)','Job Satisfaction','Retention','Site Culture','Understanding Priorities & Policies')
+
+
+response.set.all<-which(data_allyears$Response_Numeric>0)
+
+#reverse the sequence for negative questions
+data_allyears$Response_Numeric[which(data_allyears$QuestionCommonID==152|data_allyears$QuestionCommonID==153)]=6-data_allyears$Response_Numeric[which(data_allyears$QuestionCommonID==152|data_allyears$QuestionCommonID==153)]
+
+#create concatenated school type and region
+data_allyears$schoolcomb<-paste(data_allyears$Respondent_Region_FromHR,data_allyears$SchoolType)
+schooltypefields<-unique(data_allyears$schoolcomb)
+
+#list our the variables 
+demogvar<-c("Respondent_Gender_FromHR","EthnicGroup","JobGroup","agegroup")
+labelvar<-c("gender","race","job","age")
+
+
+
+
+grouptoID<-data.frame(table(mydata_aspire$QuestionCommonID,mydata_aspire$QuestionGroup)) #create` a question group to common ID reference
+
+#plot$race<-vector('list',length(questionfields))
+
+
+# manually set var 1=gender ; 2=ethnic group ; 3= job group ; 4=age group
+var=3
+varselect<-demogvar[var]
+varlevels<-levels(mydata_aspire[[varselect]])
+groupselect<-varlevels[7] #select teacher group - #7 
+  
+
+# manually set questionfield - 1=affiliation ; 2 = engagement ; 3 = job statisfaction ; 4 = retention ; 5=site culture ;; 6= priorities
+i=3
+
+  qgroup<-questionfields[i]
+  qcommonid<- subset(grouptoID,subset = Var2==qgroup & Freq>0)$Var1
+   
+
+  #define length based on list of questions
+  plot<-vector('list',length(qcommonid))
+
+
+
+for (k in 1:length(qcommonid)) {
+            qid<-qcommonid[k]  
+            qgroup.set<-response.set.all[which(data_allyears$QuestionCommonID[response.set.all]==qid)]
+            qtext<-substr(data_allyears$QuestionText_Cleaned[qgroup.set][1],1,60)
+            qgroup.mean<-rep(NA,length(schooltypefields))
+            qgroup.se<-rep(NA,length(schooltypefields))
+      
+            if (length(qgroup.set)==0) { next }
+            
+            else {
+                 for (j in 1:length(schooltypefields)) {   
+                    schoolj<-schooltypefields[j]
+                    qgroup.var.set<-qgroup.set[which(data_allyears[[varselect]][qgroup.set]==groupselect)]
+                    qgroup.var.set2<-qgroup.var.set[which(data_allyears[["schoolcomb"]][qgroup.var.set]==schoolj)]         
+                    qgroup.mean[j]<-mean(data_allyears$Response_Numeric[qgroup.var.set2])
+                    qgroup.se[j]<-1.96*sd(data_allyears$Response_Numeric[qgroup.var.set2])/sqrt(length(data_allyears$Response_Numeric[qgroup.var.set2]))   
+                    ## divide standard error by sqrt of n - to adjust for variation of averages
+                }
+     
+            df<-data.frame(schooltypefields,qgroup.mean,qgroup.se)
+            limits<-aes(ymax=qgroup.mean+qgroup.se,ymin=qgroup.mean-qgroup.se)
+            p<-ggplot(df,aes(x=schooltypefields,y=qgroup.mean,ymin=1,ymax=5),)+ggtitle(paste(groupselect,":",qgroup,";",qid,qtext))+theme(axis.text.x=element_text(angle=-90))+xlab(" ")+ylab("avg response")+xlab("")
+             plot[[k]]=p+geom_point(aes(colour=schooltypefields,size=20))+geom_text(aes(label=schooltypefields,colour=schooltypefields),size=3,angle=45,vjust=-3)+geom_errorbar(limits,width=0.2)+theme(legend.position="none")                
+              
+              
+            }       
+              
+        }
+    
+multiplot(plotlist=c(plot),cols=2)
+
+   
+
+
+
+```
